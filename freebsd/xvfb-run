@@ -1,0 +1,107 @@
+#!/bin/sh
+
+PROGNAME=xvfb-run
+SERVERNUM=0
+AUTHFILE=""
+ERRORFILE=/dev/null
+STARTWAIT=3
+XVFBARGS="-screen 0 1024x768x24"
+LISTENTCP="-nolisten tcp"
+XAUTHPROTO=.
+
+usage() {
+cat <<EOF
+Usage: $PROGNAME [OPTION ...] COMMAND
+Run COMMAND (usually an X client) in a virtual X server environment.
+Options:
+-a                      try to get a free server number, starting at
+                        -n
+-e FILE                 file used to store xauth errors and Xvfb
+                        output (default: $ERRORFILE)
+-f FILE                 file used to store auth cookie
+                                    (default: ./.Xauthority)
+-h                      display this usage message and exit
+-n NUM                  server number to use (default: $SERVERNUM)
+-l                      enable TCP port listening in the X server
+-p PROTO                X authority protocol name to use
+                        (default: xauth command's default)
+-s ARGS                 arguments (other than server number and
+                        "-nolisten tcp") to pass to the Xvfb server
+                        (default: "$XVFBARGS")
+-w DELAY                delay in seconds to wait for Xvfb to start
+                        before running COMMAND (default: $STARTWAIT)
+EOF
+}
+
+find_free_servernum() {
+    # Sadly, the "local" keyword is not POSIX.  Leave the next line commented in
+    # the hope Debian Policy eventually changes to allow it in /bin/sh scripts
+    # anyway.
+    #local i
+    i=$SERVERNUM
+    while [ -f /tmp/.X$i-lock ]; do
+        i=$(($i + 1))
+    done
+    echo $i
+}
+
+SERVERNUM=$(find_free_servernum)
+
+while getopts "ae:f:hn:lp:s:w" flag
+do
+    case $flag in
+    a|auto-servernum) SERVERNUM=$(find_free_servernum) ;;
+    e|error-file) ERRORFILE="$2"; shift ;;
+    f|auth-file) AUTHFILE="$2"; shift ;;
+    h|help) usage ; exit ;;
+    n|server-num) SERVERNUM="$2"; shift ;;
+    l|listen-tcp) LISTENTCP="" ;;
+    p|xauth-protocol) XAUTHPROTO="$2"; shift ;;
+    s|server-args) XVFBARGS="$2"; shift ;;
+    w|wait) STARTWAIT="$2"; shift ;;
+    *)  error "internal error; getopt permitted \"$1\" unexpectedly"
+        exit;;
+    esac
+done
+
+if [ $SHOWHELP ]; then
+    usage
+    exit 0
+fi
+
+if [ -z $AUTHFILE ]; then
+    XVFB_RUN_TMPDIR="$(mktemp -d /tmp/$PROGNAME.XXXXXX)"
+    AUTHFILE=$(mktemp /$XVFB_RUN_TMPDIR/Xauthority.XXXXXX)
+fi
+
+# Start Xvfb.
+MCOOKIE=`openssl rand -hex 128`
+XAUTHORITY=$AUTHFILE xauth source - << EOF >>"$ERRORFILE" 2>&1
+add :$SERVERNUM $XAUTHPROTO $MCOOKIE
+EOF
+XAUTHORITY=$AUTHFILE Xvfb ":$SERVERNUM" $XVFBARGS $LISTENTCP >>"$ERRORFILE" \
+  2>&1 &
+XVFBPID=$!
+sleep "$STARTWAIT"
+
+set +e
+DISPLAY=:$SERVERNUM XAUTHORITY=$AUTHFILE "$@" 2>&1
+RETVAL=$?
+set -e
+
+# Kill Xvfb now that the command has exited.
+if [ -z $XVFBPID ]; then
+    kill $XVFBPID
+fi
+
+#XAUTHORITY=$AUTHFILE xauth remove ":$SERVERNUM" >"$ERRORFILE" 2>&1
+if [ -n "$XVFB_RUN_TMPDIR" ]; then
+       rm -R $XVFB_RUN_TMPDIR
+#    echo $XVFB_RUN_TMPDIR
+    else
+       error "problem while cleaning up temporary directory"
+     exit 5
+fi
+
+# Return the executed command's exit status.
+exit $RETVAL

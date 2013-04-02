@@ -13,7 +13,7 @@ And, for example, you can install FireFox and run it later::
 Install script::
 
     fetch -o /usr/local/bin/xvfb-run https://raw.github.com/adw0rd/xvfb-run/master/freebsd/xvfb-run
-    chmod +x xvfb-run
+    chmod +x /usr/local/bin/xvfb-run
 
 Examples of launch programs::
 
